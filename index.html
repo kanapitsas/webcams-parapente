@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Webcams parapente</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+  :root {
+    --bg: #f4f5f2;
+    --surface: #ffffff;
+    --ink: #1d2320;
+    --muted: #6b726e;
+    --line: #dfe2dd;
+    --accent: #1f7a5a;
+    --stale: #b5651d;
+    --dead: #a33a3a;
+    --radius: 10px;
+    /* Couleurs du vent (sur fond clair, dans les balises) */
+    --w-calm: #8a9399;
+    --w-ok: #2f9e44;
+    --w-mid: #e8890c;
+    --w-high: #d6332b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121513;
+      --surface: #1b1f1d;
+      --ink: #e6e9e6;
+      --muted: #8d958f;
+      --line: #2a302d;
+      --accent: #4fbf93;
+      --stale: #e09a50;
+      --dead: #e07070;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121513;
+    --surface: #1b1f1d;
+    --ink: #e6e9e6;
+    --muted: #8d958f;
+    --line: #2a302d;
+    --accent: #4fbf93;
+    --stale: #e09a50;
+    --dead: #e07070;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  header {
+    position: sticky; top: 0; z-index: 1000;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+    padding: 10px 16px;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: .01em; }
+  .clock { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .spacer { flex: 1; }
+  .filters, .controls, .views { display: flex; gap: 6px; }
+  .filters { overflow-x: auto; scrollbar-width: none; min-width: 0; }
+  .filters::-webkit-scrollbar { display: none; }
+  button { white-space: nowrap; flex: 0 0 auto; }
+  @media (max-width: 1000px) {
+    header { padding: 8px 12px; gap: 8px 10px; }
+    .filters { order: 10; flex: 1 0 100%; }
+    .clock { display: none; }
+  }
+  @media (max-width: 560px) {
+    h1 { font-size: 15px; }
+    .btn-text { display: none; }
+  }
+  .views { gap: 0; }
+  .views button:first-child { border-radius: 999px 0 0 999px; }
+  .views button:last-child { border-radius: 0 999px 999px 0; margin-left: -1px; }
+  button {
+    font: inherit; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 999px; padding: 4px 11px; cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  body[data-view="map"] .grid-only { display: none; }
+
+  main { padding: 16px; }
+  body[data-view="map"] main { display: none; }
+  .grid {
+    display: grid; gap: 14px; grid-auto-flow: row dense;
+    grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 420px), 1fr));
+  }
+  @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); overflow: hidden;
+    display: flex; flex-direction: column;
+    scroll-margin-top: 80px;
+  }
+  .card.flash { outline: 3px solid var(--accent); outline-offset: -3px; }
+  .card.wide { grid-column: 1 / -1; }
+  .media {
+    position: relative; background: #000; aspect-ratio: 16 / 9; cursor: zoom-in; overflow: hidden;
+  }
+  .card.wide .media { aspect-ratio: 32 / 9; max-height: 75vh; }
+  .card.pano .media img { object-fit: cover; }
+  .media img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .card.wide .media img { object-fit: contain; max-height: 75vh; }
+  .media iframe { display: block; width: 100%; height: 100%; border: 0; }
+  .media.framed, .card.wide .media.framed { aspect-ratio: auto; max-height: none; cursor: default; background: var(--surface); }
+  .media.framed iframe { background: #fff; }
+  .media .err {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center; text-align: center; padding: 16px;
+    color: #ddd; font-size: 13px;
+  }
+  .media.failed .err { display: flex; }
+  .media.failed img { visibility: hidden; }
+
+  .meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 8px 12px; }
+  .meta .name { min-width: 0; }
+  .name { font-weight: 600; }
+  .alt { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .age { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .age.stale { color: var(--stale); }
+  .age.dead { color: var(--dead); }
+  .meta a { color: var(--muted); text-decoration: none; font-size: 12px; white-space: nowrap; }
+  .meta a:hover { color: var(--accent); }
+
+  /* --- Balises superposées à l'image --------------------------------------- */
+  .bal-layer { position: absolute; inset: 0; pointer-events: none; --bw: 76px; }
+  .bal {
+    position: absolute; top: 4%;
+    width: var(--bw);
+    padding: calc(var(--bw) * .06) calc(var(--bw) * .05) calc(var(--bw) * .07);
+    border-radius: calc(var(--bw) * .12);
+    background: rgba(255, 255, 255, .72);
+    backdrop-filter: blur(3px);
+    color: #33424b; text-align: center; line-height: 1.15;
+    font-size: calc(var(--bw) * .15); font-weight: 650;
+    font-variant-numeric: tabular-nums;
+    box-shadow: 0 1px 4px rgba(0,0,0,.18);
+    transition: opacity .3s;
+  }
+  .bal.at  { transform: translateX(-50%); }
+  .bal.tl  { left: 1.5%; }
+  .bal.tr  { right: 1.5%; }
+  .bal.tc  { left: 50%; transform: translateX(-50%); }
+  .bal svg { display: block; width: 100%; height: auto; }
+  .bal .v { margin-top: .15em; white-space: nowrap; }
+  .bal .n { font-size: .78em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bal .t { font-size: .68em; font-weight: 500; opacity: .8; white-space: nowrap; }
+  .bal.old { opacity: .55; }
+  .bal.nodata { display: none; }
+
+  section.group h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); font-weight: 600; margin: 22px 0 10px;
+  }
+  section.group:first-child h2 { margin-top: 4px; }
+
+  .links { margin-top: 26px; color: var(--muted); }
+  .links a { color: var(--accent); margin-right: 14px; }
+
+  /* --- Carte ---------------------------------------------------------------- */
+  #map { display: none; height: calc(100dvh - var(--header-h, 56px)); }
+  body[data-view="map"] #map { display: block; }
+  .leaflet-container { font: inherit; background: var(--bg); }
+  .cam-pin {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: #1d2320; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35);
+    display: grid; place-items: center;
+  }
+  .cam-pin svg { width: 14px; height: 14px; fill: #fff; }
+  .cam-pin.link { background: #6b726e; }
+  .wind-pin { position: relative; width: 40px; height: 40px; }
+  .wind-pin svg { position: absolute; inset: 0; overflow: visible; }
+  .wind-pin .lbl {
+    position: absolute; left: 50%; top: 100%; transform: translate(-50%, 2px);
+    font: 600 11px/1.1 -apple-system, BlinkMacSystemFont, sans-serif; color: #1d2320;
+    background: rgba(255,255,255,.85); padding: 1px 4px; border-radius: 4px; white-space: nowrap;
+  }
+  .wind-pin.old { opacity: .5; }
+  #map.far .wind-pin .lbl { display: none; }
+  .pop { width: 240px; }
+  .pop img { display: block; width: 100%; border-radius: 6px; margin-bottom: 6px; background: #000; }
+  .pop .ttl { font-weight: 650; }
+  .pop .sub { color: #6b726e; font-size: 12px; }
+  .pop .acts { display: flex; gap: 10px; margin-top: 6px; }
+  .pop .acts a { cursor: pointer; }
+
+  dialog {
+    padding: 0; border: 0; background: transparent; max-width: 100vw; max-height: 100vh; overflow: visible;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.88); }
+  dialog .zwrap { position: relative; }
+  dialog img { display: block; max-width: 96vw; max-height: 90vh; }
+  dialog p { color: #ddd; margin: 6px 0 0; text-align: center; }
+</style>
+</head>
+<body>
+<header id="header">
+  <h1>Webcams<span class="btn-text"> parapente</span></h1>
+  <span class="clock" id="clock"></span>
+  <div class="views" id="views">
+    <button data-view="grid">Webcams</button>
+    <button data-view="map">Carte</button>
+  </div>
+  <span class="spacer"></span>
+  <div class="filters" id="filters"></div>
+  <div class="controls">
+    <button id="sizeBtn" class="grid-only" title="Taille des vignettes">M</button>
+    <button id="refreshBtn" title="Recharger images et balises">↻<span class="btn-text"> Tout recharger</span></button>
+  </div>
+</header>
+
+<main id="main"></main>
+<div id="map"></div>
+
+<dialog id="zoom"><div class="zwrap"><img alt=""></div><p></p></dialog>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="cams.js"></script>
+<script>
+(() => {
+  const main = document.getElementById('main');
+  const filtersEl = document.getElementById('filters');
+  const store = {
+    get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  };
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+  // ===========================================================================
+  // Vent : données de /api/wind, partagées par les balises sur image et la carte
+  // ===========================================================================
+  let windData = {};
+  const windViews = [];   // fonctions de rendu à rappeler quand les données changent
+
+  async function fetchWind() {
+    try {
+      const r = await fetch('api/wind');
+      if (!r.ok) throw new Error(r.status);
+      windData = await r.json();
+    } catch (e) {
+      console.warn('Balises indisponibles :', e);
+    }
+    windViews.forEach(fn => fn());
+  }
+
+  function windColor(w) {
+    if (!w || w.avg == null) return 'var(--w-calm)';
+    const v = Math.max(w.avg, (w.max ?? 0) * 0.7);   // tient compte des rafales
+    return v < 3 ? 'var(--w-calm)' : v < 16 ? 'var(--w-ok)' : v < 25 ? 'var(--w-mid)' : 'var(--w-high)';
+  }
+  const dash = v => v == null ? '-' : Math.round(v);
+  function measAge(w) { return w?.ts ? Date.now() / 1000 - w.ts : Infinity; }
+  function fmtMeasAge(w) {
+    const s = measAge(w);
+    if (!isFinite(s)) return '';
+    const m = Math.round(s / 60);
+    return m < 1 ? "à l'instant" : m < 60 ? `il y a ${m} min` : `il y a ${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+  }
+  const OLD = 45 * 60;   // au-delà, la mesure est grisée
+
+  // Rose des vents : anneau, N, triangle rouge = d'où vient le vent, disque = vitesse moyenne.
+  function compassSVG(w) {
+    const ticks = [0, 90, 180, 270].map(a =>
+      `<line x1="0" y1="-44" x2="0" y2="-33" transform="rotate(${a})" stroke="#fff" stroke-width="3"/>`).join('');
+    const tri = w?.dir != null && (w.max ?? w.avg ?? 0) > 0
+      ? `<path d="M0,-27 L-11,-50 L11,-50 Z" transform="rotate(${w.dir})" fill="#e0302a" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>`
+      : '';
+    return `<svg viewBox="-52 -52 104 104" aria-hidden="true">
+      <circle r="38.5" fill="none" stroke="#3d4a52" stroke-width="10"/>${ticks}
+      <text y="-25" text-anchor="middle" font-size="9" font-weight="700" fill="#3d4a52">N</text>
+      <circle r="23" fill="${windColor(w)}"/>
+      <text y="8.5" text-anchor="middle" font-size="25" font-weight="700" fill="#fff">${dash(w?.avg)}</text>
+      ${tri}
+    </svg>`;
+  }
+
+  // Calque de balises posé sur une image (carte de la grille ou zoom).
+  function windLayer(cam, media) {
+    const layer = document.createElement('div');
+    layer.className = 'bal-layer';
+    const defaults = ['tl', 'tr', 'tc'];
+    const items = cam.winds.map((spec, i) => {
+      const s = typeof spec === 'string' ? { id: spec } : spec;
+      const el = document.createElement('div');
+      if (s.x != null) { el.className = 'bal at'; el.style.left = s.x + '%'; }
+      else el.className = 'bal ' + (defaults[i] ?? 'tc');
+      if (s.y != null) el.style.top = s.y + '%';
+      layer.append(el);
+      return { id: s.id, el };
+    });
+    const render = () => {
+      for (const { id, el } of items) {
+        const w = windData[id];
+        const meta = BALISES[id] ?? {};
+        el.classList.toggle('nodata', !w || w.error || w.ts == null);
+        el.classList.toggle('old', measAge(w) > OLD);
+        el.title = `${meta.name ?? id} · ${meta.alt ?? '?'} m — min/moy/max km/h`;
+        el.innerHTML = compassSVG(w) +
+          `<div class="v">${dash(w?.min)}/${dash(w?.avg)}/${dash(w?.max)}</div>` +
+          `<div class="n">${esc(meta.name ?? id)}</div><div class="t">${fmtMeasAge(w)}</div>`;
+      }
+    };
+    // Taille des balises proportionnelle à la hauteur de l'image (lisible sur les panoramas).
+    const ro = new ResizeObserver(([e]) => {
+      const h = e.contentRect.height, wdt = e.contentRect.width;
+      layer.style.setProperty('--bw', Math.round(Math.max(52, Math.min(118, h * 0.27, wdt * 0.16))) + 'px');
+    });
+    ro.observe(media);
+    windViews.push(render);
+    render();
+    // Pour les calques temporaires (zoom) : tout libérer.
+    layer.dispose = () => { ro.disconnect(); windViews.splice(windViews.indexOf(render), 1); layer.remove(); };
+    return layer;
+  }
+
+  // ===========================================================================
+  // Filtres, vues, tailles
+  // ===========================================================================
+  const groups = [...new Set(CAMS.map(c => c.group))];
+  let activeGroup = store.get('group', 'Tous');
+  if (activeGroup !== 'Tous' && !groups.includes(activeGroup)) activeGroup = 'Tous';
+  for (const g of ['Tous', ...groups]) {
+    const b = document.createElement('button');
+    b.textContent = g;
+    b.onclick = () => { activeGroup = g; store.set('group', g); applyFilter(); };
+    b.dataset.group = g;
+    filtersEl.append(b);
+  }
+  function applyFilter() {
+    for (const b of filtersEl.children) b.setAttribute('aria-pressed', b.dataset.group === activeGroup);
+    for (const s of main.querySelectorAll('section.group'))
+      s.hidden = activeGroup !== 'Tous' && s.dataset.group !== activeGroup;
+    if (map && view === 'map') fitGroup();
+  }
+
+  const sizes = [['S', '300px'], ['M', '420px'], ['L', '640px']];
+  let sizeIdx = store.get('size', 1);
+  const sizeBtn = document.getElementById('sizeBtn');
+  function applySize() {
+    const [label, px] = sizes[sizeIdx];
+    document.documentElement.style.setProperty('--card-min', px);
+    sizeBtn.innerHTML = '<span class="btn-text">Vignettes : </span>' + label;
+  }
+  sizeBtn.onclick = () => { sizeIdx = (sizeIdx + 1) % sizes.length; store.set('size', sizeIdx); applySize(); };
+
+  let view = store.get('view', 'grid');
+  const viewsEl = document.getElementById('views');
+  function setView(v) {
+    view = v; store.set('view', v);
+    document.body.dataset.view = v;
+    for (const b of viewsEl.children) b.setAttribute('aria-pressed', b.dataset.view === v);
+    if (v === 'map') {
+      if (map) requestAnimationFrame(() => fitGroup());   // carte déjà créée, mais cachée jusqu'ici
+      else initMap();
+    }
+  }
+  for (const b of viewsEl.children) b.onclick = () => setView(b.dataset.view);
+
+  const header = document.getElementById('header');
+  new ResizeObserver(() => {
+    document.documentElement.style.setProperty('--header-h', header.offsetHeight + 'px');
+    if (view === 'map') map?.invalidateSize();
+  }).observe(header);
+
+  // ===========================================================================
+  // Grille de webcams
+  // ===========================================================================
+  const imageCams = [];
+  const cardOf = new Map();
+  for (const g of groups) {
+    const section = document.createElement('section');
+    section.className = 'group';
+    section.dataset.group = g;
+    section.innerHTML = `<h2>${esc(g)}</h2><div class="grid"></div>`;
+    const grid = section.querySelector('.grid');
+    for (const cam of CAMS.filter(c => c.group === g && c.type !== 'link')) grid.append(makeCard(cam));
+    if (grid.children.length) main.append(section);
+  }
+
+  const links = CAMS.filter(c => c.type === 'link');
+  if (links.length) {
+    const p = document.createElement('p');
+    p.className = 'links';
+    p.innerHTML = 'Autres webcams (non intégrables) : ' +
+      links.map(c => `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.name)}</a>`).join('');
+    main.append(p);
+  }
+
+  function makeCard(cam) {
+    const card = document.createElement('article');
+    card.className = 'card' + (cam.wide ? ' wide' : '');
+    cardOf.set(cam, card);
+    const source = cam.page ? `<a href="${esc(cam.page)}" target="_blank" rel="noopener" title="Ouvrir la source">source ↗</a>` : '';
+    const alt = cam.alt ? `<span class="alt">${cam.alt} m</span>` : '';
+
+    if (cam.type === 'iframe') {
+      card.innerHTML = `
+        <div class="media framed"><iframe src="${esc(cam.url)}" scrolling="no" allowfullscreen></iframe></div>
+        <div class="meta"><span class="name">${esc(cam.name)}</span>${alt}<span class="age">live</span>
+          <a href="#" class="fs" title="Plein écran">plein écran ⤢</a>${source}</div>`;
+      const media = card.querySelector('.media');
+      const frame = card.querySelector('iframe');
+      card.querySelector('.fs').onclick = e => { e.preventDefault(); frame.requestFullscreen?.(); };
+      if (cam.ratio) {
+        // Hauteur = image pleine largeur (moins les marges du body) + marges + interligne sous l'image.
+        const m = cam.bodyMargin ?? 0;
+        new ResizeObserver(([entry]) => {
+          const w = entry.contentRect.width;
+          media.style.height = Math.ceil((w - 2 * m) / cam.ratio + 2 * m + 4) + 'px';
+        }).observe(media);
+      }
+    } else {
+      card.innerHTML = `
+        <div class="media"><img alt="${esc(cam.name)}" decoding="async"><div class="err">Image indisponible</div></div>
+        <div class="meta"><span class="name">${esc(cam.name)}</span>${alt}<span class="age">…</span>${source}</div>`;
+      const st = { cam, img: card.querySelector('img'), media: card.querySelector('.media'),
+                   age: card.querySelector('.age'), loadedAt: 0, failedAt: 0 };
+      st.img.onload = () => {
+        st.loadedAt = Date.now(); st.failedAt = 0; st.retries = 0;
+        st.media.classList.remove('failed');
+        // Respecte le format réel de l'image ; les panoramas prennent toute la largeur.
+        const r = st.img.naturalWidth / st.img.naturalHeight;
+        if (r) {
+          st.media.style.aspectRatio = r;
+          if (r > 2.4) card.classList.add('wide', 'pano');
+        }
+      };
+      st.img.onerror = () => {
+        // Certaines caméras réécrivent le fichier pendant qu'on le lit (image tronquée) :
+        // on retente deux fois avant de déclarer l'échec.
+        if ((st.retries = (st.retries ?? 0) + 1) <= 2) { setTimeout(() => { st.img.src = bust(st.cam.url); }, 4000); return; }
+        st.failedAt = Date.now(); if (!st.loadedAt) st.media.classList.add('failed');
+      };
+      st.media.onclick = () => openZoom(st);
+      if (cam.winds?.length) st.media.append(windLayer(cam, st.media));
+      imageCams.push(st);
+      load(st);
+      setInterval(() => load(st), (cam.refresh ?? 60) * 1000);
+    }
+    return card;
+  }
+
+  function bust(url) {
+    return url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+  }
+  function load(st) {
+    // Inutile de re-télécharger quand l'onglet est caché (mais on charge au moins une fois).
+    if (document.hidden && st.img.getAttribute('src')) return;
+    st.retries = 0;
+    st.img.src = bust(st.cam.url);
+  }
+
+  // Âge affiché = temps depuis le dernier chargement réussi (le serveur
+  // ne nous donne pas l'heure de prise de vue en cross-origin).
+  function fmtAge(ms) {
+    const s = Math.round(ms / 1000);
+    if (s < 60) return s + ' s';
+    const m = Math.round(s / 60);
+    return m < 60 ? m + ' min' : Math.round(m / 60) + ' h';
+  }
+  function tick() {
+    const now = Date.now();
+    document.getElementById('clock').textContent =
+      new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    for (const st of imageCams) {
+      if (!st.loadedAt) { st.age.textContent = st.failedAt ? 'hors ligne' : '…'; st.age.className = 'age' + (st.failedAt ? ' dead' : ''); continue; }
+      const age = now - st.loadedAt;
+      st.age.textContent = (st.failedAt ? 'échec, dernière image il y a ' : 'chargée il y a ') + fmtAge(age);
+      const limit = (st.cam.refresh ?? 60) * 1000;
+      st.age.className = 'age' + (st.failedAt ? ' dead' : age > 3 * limit ? ' stale' : '');
+    }
+  }
+  setInterval(tick, 1000);
+  tick();
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) { imageCams.forEach(load); fetchWind(); }
+  });
+  document.getElementById('refreshBtn').onclick = () => { imageCams.forEach(load); fetchWind(); };
+
+  // --- Zoom ------------------------------------------------------------------
+  const zoom = document.getElementById('zoom');
+  const zwrap = zoom.querySelector('.zwrap');
+  const zimg = zoom.querySelector('img');
+  let zoomTimer, zoomLayer;
+  function openZoom(st) {
+    zimg.src = st.img.src;
+    zoom.querySelector('p').textContent = st.cam.name + (st.cam.alt ? ` · ${st.cam.alt} m` : '');
+    zoomLayer?.dispose();
+    zoomLayer = st.cam.winds?.length ? windLayer(st.cam, zwrap) : null;
+    if (zoomLayer) zwrap.append(zoomLayer);
+    zoom.showModal();
+    clearInterval(zoomTimer);
+    zoomTimer = setInterval(() => { zimg.src = st.img.src; }, 2000);
+  }
+  zoom.onclick = () => zoom.close();
+  zoom.onclose = () => { clearInterval(zoomTimer); zoomLayer?.dispose(); zoomLayer = null; };
+
+  // ===========================================================================
+  // Carte (Leaflet, chargée à la première ouverture)
+  // ===========================================================================
+  let map, windMarkers = {};
+  const CAM_ICON = '<svg viewBox="0 0 24 24"><path d="M9 4 7.2 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.2L15 4H9zm3 4.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>';
+
+  function windIconHtml(id) {
+    const w = windData[id];
+    const meta = BALISES[id];
+    const has = w && !w.error && w.ts != null;
+    // Pointe sur le bord du disque, dans le sens où va le vent (dir = d'où il vient).
+    const arrow = has && w.dir != null && (w.max ?? w.avg ?? 0) > 0
+      ? `<path d="M20 38.5 L13.5 29 Q20 31.5 26.5 29 Z" transform="rotate(${w.dir} 20 20)" fill="#1d2320" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/>`
+      : '';
+    return `<div class="wind-pin${has && measAge(w) > OLD ? ' old' : ''}">
+      <svg viewBox="0 0 40 40">${arrow}<circle cx="20" cy="20" r="11" fill="${has ? windColor(w) : '#bbb'}" stroke="#fff" stroke-width="2"/>
+        <text x="20" y="24" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">${has ? dash(w.avg) : '?'}</text></svg>
+      <span class="lbl">${esc(meta.name)}</span></div>`;
+  }
+  function windPopup(id) {
+    const w = windData[id], meta = BALISES[id];
+    const vals = w && !w.error && w.ts != null
+      ? `<div>min / moy / max : <b>${dash(w.min)} / ${dash(w.avg)} / ${dash(w.max)}</b> km/h</div>
+         <div class="sub">${w.dir != null ? `vent du ${w.dir}° · ` : ''}${fmtMeasAge(w)}</div>`
+      : '<div class="sub">pas de données</div>';
+    return `<div class="pop"><div class="ttl">${esc(meta.name)}</div><div class="sub">${meta.alt} m · balise ${esc(id)}</div>${vals}
+      <div class="acts"><a href="https://www.spotair.mobi/page/wind/${id}" target="_blank" rel="noopener">spotair ↗</a></div></div>`;
+  }
+  function renderWindMarkers() {
+    if (!map) return;
+    for (const [id, m] of Object.entries(windMarkers)) {
+      m.setIcon(L.divIcon({ className: '', html: windIconHtml(id), iconSize: [40, 40], iconAnchor: [20, 20] }));
+      m.setPopupContent(windPopup(id));
+    }
+  }
+  windViews.push(renderWindMarkers);
+
+  function camPopup(cam) {
+    const thumb = cam.type === 'link' ? '' : `<img src="${esc(bust(cam.thumb ?? cam.url))}" alt="">`;
+    const acts = cam.type === 'link'
+      ? `<a href="${esc(cam.url)}" target="_blank" rel="noopener">ouvrir ↗</a>`
+      : `<a data-show>voir dans la grille</a>${cam.page ? `<a href="${esc(cam.page)}" target="_blank" rel="noopener">source ↗</a>` : ''}`;
+    return `<div class="pop">${thumb}<div class="ttl">${esc(cam.name)}</div>
+      <div class="sub">${esc(cam.group)}${cam.alt ? ` · ${cam.alt} m` : ''}</div><div class="acts">${acts}</div></div>`;
+  }
+
+  function showInGrid(cam) {
+    setView('grid');
+    activeGroup = 'Tous'; store.set('group', 'Tous'); applyFilter();
+    const card = cardOf.get(cam);
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    card.classList.add('flash');
+    setTimeout(() => card.classList.remove('flash'), 1600);
+  }
+
+  function initMap() {
+    if (map || !window.L) return;
+    map = L.map('map', { zoomControl: true, zoomSnap: 0.5 });
+    // Noms des balises seulement quand on est assez près (sinon ils se chevauchent).
+    const syncLabels = () => document.getElementById('map').classList.toggle('far', map.getZoom() < 10);
+    map.on('zoomend', syncLabels);
+    L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+      maxZoom: 16,
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA) · vent : <a href="https://www.spotair.mobi">spotair</a>/FFVL/ROMMA',
+    }).addTo(map);
+
+    for (const cam of CAMS.filter(c => c.lat != null)) {
+      const icon = L.divIcon({ className: '', html: `<div class="cam-pin${cam.type === 'link' ? ' link' : ''}">${CAM_ICON}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+      const m = L.marker([cam.lat, cam.lon], { icon, title: cam.name, zIndexOffset: 500 }).addTo(map);
+      m.bindPopup(() => camPopup(cam), { maxWidth: 260 });
+      m.on('popupopen', e => {
+        e.popup.getElement().querySelector('[data-show]')?.addEventListener('click', () => { map.closePopup(); showInGrid(cam); });
+      });
+    }
+    for (const id of Object.keys(BALISES)) {
+      const b = BALISES[id];
+      windMarkers[id] = L.marker([b.lat, b.lon], { icon: L.divIcon({ className: '', html: windIconHtml(id), iconSize: [40, 40], iconAnchor: [20, 20] }) })
+        .bindPopup(windPopup(id), { maxWidth: 260 })
+        .addTo(map);
+    }
+    fitGroup();
+    syncLabels();
+  }
+
+  function fitGroup() {
+    if (!map) return;
+    map.invalidateSize();
+    const cams = CAMS.filter(c => c.lat != null && (activeGroup === 'Tous' || c.group === activeGroup));
+    const pts = cams.map(c => [c.lat, c.lon]);
+    for (const c of cams) for (const s of c.winds ?? []) {
+      const b = BALISES[typeof s === 'string' ? s : s.id];
+      if (b) pts.push([b.lat, b.lon]);
+    }
+    if (pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 12 });
+  }
+
+  // ===========================================================================
+  applySize();
+  applyFilter();
+  setView(view);
+  fetchWind();
+  setInterval(() => { if (!document.hidden) fetchWind(); }, 120 * 1000);
+})();
+</script>
+</body>
+</html>
