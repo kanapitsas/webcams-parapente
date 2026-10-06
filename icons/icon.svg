@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17457a"/>
+      <stop offset="1" stop-color="#7cc0e0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#sky)"/>
+  <circle cx="372" cy="150" r="30" fill="#ffd978" opacity=".9"/>
+  <!-- montagnes -->
+  <path d="M0 352 L96 262 L150 304 L252 186 L338 286 L392 240 L512 334 V512 H0 Z" fill="#335f71"/>
+  <path d="M252 186 L222 221 L240 216 L253 230 L266 214 L284 224 Z" fill="#eef5f8"/>
+  <path d="M392 240 L374 256 L386 254 L396 262 L404 250 Z" fill="#eef5f8"/>
+  <path d="M0 416 Q130 344 256 398 T512 380 V512 H0 Z" fill="#1d3b33"/>
+  <!-- parapente -->
+  <g transform="translate(-30 -34) rotate(-10 244 200)">
+    <g stroke="#0f2238" stroke-width="3.5" stroke-linecap="round" fill="none">
+      <path d="M166 180 L244 272"/>
+      <path d="M205 160 L244 272"/>
+      <path d="M283 160 L244 272"/>
+      <path d="M322 180 L244 272"/>
+    </g>
+    <path d="M156 186 C182 112 306 112 332 186 C304 152 184 152 156 186 Z" fill="#ff6a2b" stroke="#c94716" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M204 136 L208 162 M244 126 L244 154 M284 136 L280 162" stroke="#c94716" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="244" cy="276" r="10" fill="#0f2238"/>
+    <path d="M235 285 L253 285 L249 308 L239 308 Z" fill="#0f2238"/>
+  </g>
+</svg>
